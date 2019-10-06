@@ -1,0 +1,49 @@
+* CVL GPU Cluster Slurm Utilities
+
+This is a collection of scripts used by the Computer Vision Laboratory
+at the University of Nottingham on our Slurm GPU Cluster.
+
+** Utilities
+
+*** clusterfree
+
+This script displays GPU availability information, for example,
+whether how many single GPUs, pairs, triplets or quads are
+available. It also displays the QoS which are allowed to submit jobs
+to those partitions.
+
+#+BEGIN_SRC
+$ clusterfree
++------------+---------+---------+--------------------------+------------------------+
+|            |  # GPU  |  Avail  |  Pairs  Triplets  Quads  |  Allowed QoS           |
++------------+---------+---------+--------------------------+------------------------+
+| all        |  49     |  21     |  10     3         3      |  web                   |
+| general    |  31     |  11     |  5      1         1      |  normal busybee short  |
+| turing     |  8      |  8      |  4      2         2      |  normal busybee short  |
+| undergrad  |  2      |  2      |  1      0         0      |  undergrad short       |
++------------+---------+---------+--------------------------+------------------------+
+#+END_SRC
+
+*** smem
+
+Finding out the MaxRSS of your Slurm jobs usually requires the use of
+sstat with several arguments. This script enumerates the user's
+running jobs and reports memory consumption for each one.
+
+#+BEGIN_SRC
+$ smem
+User	JobID	Req	Max Used
+------------------------------------
+pszaj	246317	954M	167M
+pszaj	246318	954M	168M
+pszaj	255305	30G	21G
+pszaj	255415	12G	8.2G
+#+END_SRC
+
+
+** Contributions
+
+If you have found a bug and would like to submit a fix, please do so
+with a pull request or by emailing your git-formatted patch to
+asj@cs.nott.ac.uk. Thanks!
+

@@ -1,0 +1,68 @@
+#!/bin/bash
+
+
+######################################################################
+# Copyright 2019 Aaron S. Jackson <asj@cs.nott.ac.uk>
+#                University of Nottingham
+#
+# This script shows the number of single, pairs, triplets and quads of
+# GPUs available per Slurm partition. This is useful to users for
+# diagnosing why their job hasn't started.
+#
+# For each partition, it also displays the QoS which are allowed to
+# submit jobs to that partition.
+
+regex='s/.*gpu=\([0-9]\).*/\1/p'
+
+p=$(while IFS='=' read x partition ; do
+	IFS='=' read x nodes
+	echo $partition $nodes
+    done < <(scontrol show part | \
+		 grep -e PartitionName -e ' Nodes'))
+
+n=$(while read node ; do
+	read state
+	read avail
+	read alloc
+	node=$(echo $node | tr '=' ' ' | awk '{ print $2 }')
+
+	state=$(echo $state | sed -n 's/.*State=\([A-Z+]*\).*/\1/p')
+	avail=$(echo $avail | sed -n $regex)
+	alloc=$(echo $alloc | sed -n $regex)
+
+
+	if [ $state = "DOWN" ] || [[ $state == *"DRAIN"* ]]; then
+	    continue
+	fi
+
+	echo $node ${avail:-0} ${alloc:-0}
+    done < <(scontrol show nodes | \
+		 grep -e NodeName -e TRES -e State))
+
+
+qos=$(scontrol show -o partition | \
+    sed 's/PartitionName=\([a-z]*\).*AllowQos=\([a-z,]*\).*/\1\t\2/' | \
+    tr ',' ' ' | sed 's/ unlimited//')
+
+(
+    echo "+,+,,+,,+,,,,+,,+"
+    echo "|,|,# GPU,|,Avail,|,Pairs,Triplets,Quads,|,Allowed QoS,|"
+    echo "+,+,,+,,+,,,,+,,+"
+    while read name nodes ; do
+	echo -n "| "$name,"|",
+	pn=$(while read node ; do
+		 echo "$n" | grep $node
+	     done < <(echo "$nodes" | tr ',' '\n'))
+
+	avail=$(echo "$pn" | awk '{sum+=$2} END { print sum }')
+	singl=$(echo "$pn" | awk '{sum+=$2-$3} END { print sum }')
+	pairs=$(echo "$pn" | awk '{sum+=int(($2 - $3)/2)} END { print sum }')
+	trips=$(echo "$pn" | awk '{sum+=int(($2 - $3)/3)} END { print sum }')
+	quads=$(echo "$pn" | awk '{sum+=int(($2 - $3)/4)} END { print sum }')
+	q=$(echo "$qos" | awk -F'\t' -v p="$name" '$1 == p { print $2 }')
+
+	echo $avail,"|",$singl,"|",$pairs,$trips,$quads,"|",$q,"|"
+    done < <(echo "$p")
+    echo "+,+,,+,,+,,,,+,,+"
+) | column -t -s',' | sed '/+/s/ /-/g'
+

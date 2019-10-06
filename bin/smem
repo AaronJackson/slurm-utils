@@ -1,0 +1,23 @@
+#!/bin/bash
+
+######################################################################
+# Copyright 2019 Aaron S. Jackson <asj@cs.nott.ac.uk>
+#                University of Nottingham
+#
+# This script goes through the user's running jobs in the Slurm queue
+# and extracts the maximum resisdent set size for that job.
+
+echo -e "User\tJobID\tReq\tMax Used"
+echo    "------------------------------------"
+squeue -u $USER -t R -h -o "%u %i %m" | \
+    while read username jobid mem; do
+    m=`sstat -n $jobid -omaxrss | tr -d ' '`
+    if [ -z "$m" ]; then
+	m=`sstat -n $jobid.batch -omaxrss | tr -d ' '`
+    fi
+    req=`numfmt --from auto --to iec $mem`
+    real=`numfmt --from auto --to iec $m`
+
+    echo -e "$username\t$jobid\t$req\t$real"    
+done
+
