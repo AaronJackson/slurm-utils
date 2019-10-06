@@ -7,17 +7,52 @@
 # This script goes through the user's running jobs in the Slurm queue
 # and extracts the maximum resisdent set size for that job.
 
-echo -e "User\tJobID\tReq\tMax Used"
-echo    "------------------------------------"
-squeue -u $USER -t R -h -o "%u %i %m" | \
-    while read username jobid mem; do
+HEADER=yes
+FORMAT=iec
+
+for i in "$@" ; do
+    case $i in
+	-n)
+	    HEADER=no
+	    shift
+	    ;;
+
+	-b)
+	    FORMAT=none
+	    shift
+	    ;;
+
+	-h|*)
+	    echo "smem : Slurm Memory Monitor"
+	    echo "Released under the GNU GPL."
+	    echo
+	    echo "Copyright 2019 Aaron S. Jackson <asj@cs.nott.ac.uk>"
+	    echo "               University of Nottingham"
+	    echo
+	    echo "ARGUMENTS:"
+	    echo -e "\t-n\tDisable header, useful for scripting."
+	    echo -e "\t-b\tDo not scale numbers (e.g. remove K, M, G suffixes)."
+	    echo
+	    exit
+	    ;;
+    esac
+done
+
+if [ $HEADER == "yes" ] ; then
+    printf "%10s %8s %15s %11s %11s\n" \
+	   "User" "JobID" "Name" "Req" "Max Used"
+    printf "%59s\n" "" | tr ' ' '-'
+fi
+
+squeue -u $USER -t R -h -o "%u %i %j %m" | \
+    while read username jobid jobname mem; do
     m=`sstat -n $jobid -omaxrss | tr -d ' '`
     if [ -z "$m" ]; then
 	m=`sstat -n $jobid.batch -omaxrss | tr -d ' '`
     fi
-    req=`numfmt --from auto --to iec $mem`
-    real=`numfmt --from auto --to iec $m`
+    req=`numfmt --from auto --to $FORMAT $mem`
+    real=`numfmt --from auto --to $FORMAT $m`
 
-    echo -e "$username\t$jobid\t$req\t$real"    
+    printf "%10s %8s %15s %11s %11s\n" \
+	   $username $jobid $jobname $req $real
 done
-

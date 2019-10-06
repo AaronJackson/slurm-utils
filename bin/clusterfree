@@ -12,6 +12,24 @@
 # For each partition, it also displays the QoS which are allowed to
 # submit jobs to that partition.
 
+for i in "$@" ; do
+    case $i in
+	-h|*)
+	    echo "clusterfree"
+	    echo "Released under the GNU GPL."
+	    echo
+	    echo "Copyright 2019 Aaron S. Jackson <asj@cs.nott.ac.uk>"
+	    echo "               University of Nottingham"
+	    echo
+	    echo "ARGUMENTS:"
+	    echo "  This script supports no arguments."
+	    echo
+	    exit
+	    ;;
+    esac
+done
+
+
 regex='s/.*gpu=\([0-9]\).*/\1/p'
 
 p=$(while IFS='=' read x partition ; do
