@@ -12,8 +12,23 @@
 # For each partition, it also displays the QoS which are allowed to
 # submit jobs to that partition.
 
+GRES=gpu
+MIN_CPU=0
+
 for i in "$@" ; do
     case $i in
+	-c)
+	    GRES=cpu
+	    ;;
+
+	-g)
+	    GRES=gpu
+	    ;;
+
+	--min-cpu=*)
+	    MIN_CPU=${i#*=}
+	    ;;
+
 	-h|*)
 	    echo "clusterfree"
 	    echo "Released under the GNU GPL."
@@ -21,16 +36,23 @@ for i in "$@" ; do
 	    echo "Copyright 2019 Aaron S. Jackson <asj@cs.nott.ac.uk>"
 	    echo "               University of Nottingham"
 	    echo
+	    echo "DESCRIPION:"
+	    echo "  This scripts shows the number of available GPUs (I)"
+	    echo "  along with the number of pairs (II), triplets (II)"
+	    echo "  and quads (IV) available on any single node"
+	    echo
 	    echo "ARGUMENTS:"
-	    echo "  This script supports no arguments."
+	    echo "          -g    Show available GPUs (default)."
+	    echo "          -c    Show available CPUs."
+	    echo " --min-cpu=n    Given n CPUs are available."
 	    echo
 	    exit
 	    ;;
     esac
 done
 
-
-regex='s/.*gpu=\([0-9]\).*/\1/p'
+gregex='s/.*gpu=\([0-9]\).*/\1/p'
+cregex='s/.*cpu=\([0-9]*\).*/\1/p'
 
 p=$(while IFS='=' read x partition ; do
 	IFS='=' read x nodes
@@ -45,26 +67,37 @@ n=$(while read node ; do
 	node=$(echo $node | tr '=' ' ' | awk '{ print $2 }')
 
 	state=$(echo $state | sed -n 's/.*State=\([A-Z+]*\).*/\1/p')
-	avail=$(echo $avail | sed -n $regex)
-	alloc=$(echo $alloc | sed -n $regex)
+	gavail=$(echo $avail | sed -n $gregex)
+	galloc=$(echo $alloc | sed -n $gregex)
+	cavail=$(echo $avail | sed -n $cregex)
+	calloc=$(echo $alloc | sed -n $cregex)
 
-
-	if [ $state = "DOWN" ] || [[ $state == *"DRAIN"* ]]; then
+	if [ "$state" = "DOWN" ] || [[ "$state" == *"DRAIN"* ]]; then
 	    continue
 	fi
 
+	if [ $(( $cavail - ${calloc:-0} )) -lt "$MIN_CPU" ] ; then
+	    # Set the number of allocated GPUs to the number of
+	    # available GPUs to make it seem like none are available.
+	    galloc=$gavail
+	fi
+
+	if [ "$GRES" == "gpu" ] ; then
+	    alloc=$galloc; avail=$gavail;
+	elif [ "$GRES" == "cpu" ] ; then
+	    alloc=$calloc; avail=$cavail;
+	fi
 	echo $node ${avail:-0} ${alloc:-0}
     done < <(scontrol show nodes | \
 		 grep -e NodeName -e TRES -e State))
 
-
 qos=$(scontrol show -o partition | \
     sed 's/PartitionName=\([a-z]*\).*AllowQos=\([a-z,]*\).*/\1\t\2/' | \
-    tr ',' ' ' | sed 's/ unlimited//')
+    tr ',' ' ')
 
 (
     echo "+,+,,+,,+,,,,+,,+"
-    echo "|,|,# GPU,|,Avail,|,Pairs,Triplets,Quads,|,Allowed QoS,|"
+    echo "|,|,# $GRES,|,I,|,II,III,IV,|,Allowed QoS,|"
     echo "+,+,,+,,+,,,,+,,+"
     while read name nodes ; do
 	echo -n "| "$name,"|",
@@ -73,14 +106,13 @@ qos=$(scontrol show -o partition | \
 	     done < <(echo "$nodes" | tr ',' '\n'))
 
 	avail=$(echo "$pn" | awk '{sum+=$2} END { print sum }')
-	singl=$(echo "$pn" | awk '{sum+=$2-$3} END { print sum }')
-	pairs=$(echo "$pn" | awk '{sum+=int(($2 - $3)/2)} END { print sum }')
-	trips=$(echo "$pn" | awk '{sum+=int(($2 - $3)/3)} END { print sum }')
-	quads=$(echo "$pn" | awk '{sum+=int(($2 - $3)/4)} END { print sum }')
+	I=$(echo "$pn" | awk '{sum+=$2-$3} END { print sum }')
+	II=$(echo "$pn" | awk '{sum+=int(($2 - $3)/2)} END { print sum }')
+	III=$(echo "$pn" | awk '{sum+=int(($2 - $3)/3)} END { print sum }')
+	IV=$(echo "$pn" | awk '{sum+=int(($2 - $3)/4)} END { print sum }')
 	q=$(echo "$qos" | awk -F'\t' -v p="$name" '$1 == p { print $2 }')
 
-	echo $avail,"|",$singl,"|",$pairs,$trips,$quads,"|",$q,"|"
+	echo $avail,"|",$I,"|",$II,$III,$IV,"|",$q,"|"
     done < <(echo "$p")
     echo "+,+,,+,,+,,,,+,,+"
 ) | column -t -s',' | sed '/+/s/ /-/g'
-
