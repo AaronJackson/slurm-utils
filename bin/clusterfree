@@ -16,27 +16,31 @@ set -u
 GRES=gpu
 MIN_CPU=0
 MIN_RAM=0
+CONSTRAINT=
 
-while getopts ":cghn:m:" opt ; do
+while getopts ":cghn:m:t:" opt ; do
     case ${opt} in
-	c)
+	c)  # Show available CPUs
 	    GRES=cpu
 	    ;;
 
-	g)
+	g)  # Show available GPUs
 	    GRES=gpu
 	    ;;
 
-	n)
+	n)  # Only include nodes with X available CPUs
 	    MIN_CPU=$OPTARG
 	    ;;
 
-	m)
-	    MIN_RAM=$(echo "$OPTARG" | tr '[:lower:]' '[:upper:]')
-	    MIN_RAM=$(numfmt --from=iec "$MIN_RAM")
+	m)  # Only show nodes with X amount of available RAM
+	    MIN_RAM=$(echo "${OPTARG^^}" | numfmt --from=iec "$MIN_RAM")
 	    ;;
 
-	h)
+	t)  # Require a node feature
+	    CONSTRAINT=$(echo "$OPTARG" | tr ',' '\n' | sort)
+	    ;;
+
+	h)  # Show some help
 	    echo "clusterfree"
 	    echo "Released under the GNU GPL."
 	    echo
@@ -49,11 +53,13 @@ while getopts ":cghn:m:" opt ; do
 	    echo "  and quads (IV) available on any single node"
 	    echo
 	    echo "ARGUMENTS:"
-	    echo " -g      Show available GPUs (default)."
-	    echo " -c      Show available CPUs."
+	    echo " -g          Show available GPUs (default)."
+	    echo " -c          Show available CPUs."
 	    echo
-	    echo " -n X    Given X CPUs are available."
-	    echo " -m X    Given X bytes of RAM available (suffix K, M, G, etc)"
+	    echo " -n X        Given X CPUs are available."
+	    echo " -m X        Given X bytes of RAM available (with suffix)."
+	    echo " -t features Given nodes of a features (command delimited)."
+	    echo
 	    exit
 	    ;;
 
@@ -64,22 +70,29 @@ while getopts ":cghn:m:" opt ; do
     esac
 done
 
-gregex='s/.*gpu=\([0-9]\).*/\1/p'
-cregex='s/.*cpu=\([0-9]*\).*/\1/p'
-mregex='s/.*mem=\([0-9]*[KMGT]\).*/\1/pi'
-
+# Get a list of partitions.
 p=$(while IFS='=' read -r _ partition ; do
 	IFS='=' read -r _ nodes
 	echo "$partition $nodes"
     done < <(scontrol show part | \
 		 grep -e PartitionName -e ' Nodes'))
 
+
+# Get a list of nodes and dump availability info.
+gregex='s/.*gpu=\([0-9]\).*/\1/p'
+cregex='s/.*cpu=\([0-9]*\).*/\1/p'
+mregex='s/.*mem=\([0-9]*[KMGT]\).*/\1/pi'
+
 n=$(while read -r node ; do
+	read -r features
 	read -r state
 	read -r avail
 	read -r alloc
+
 	node=$(echo "$node" | tr '=' ' ' | awk '{ print $2 }')
 
+	# Grab node stats
+	features=$(echo "${features#*=}" | tr ',' '\n' | sort)
 	state=$(echo "$state" | sed -n 's/.*State=\([A-Z+]*\).*/\1/p')
 	gavail=$(echo "$avail" | sed -n "$gregex")
 	galloc=$(echo "$alloc" | sed -n "$gregex")
@@ -88,6 +101,15 @@ n=$(while read -r node ; do
 	mavail=$(echo "$avail" | sed -n "$mregex" | numfmt --from=iec)
 	malloc=$(echo "$alloc" | sed -n "$mregex" | numfmt --from=iec)
 
+	# Matching node features
+	if [ -n "$CONSTRAINT" ] ; then
+	    mfeat=$(comm -12 \
+			 <(echo "$CONSTRAINT") \
+			 <(echo "$features") | wc -l)
+	    [[ $mfeat -eq 0 ]] && continue
+	fi
+
+	# Check the node is still a valid contender
 	if [ "$state" = "DOWN" ] || [[ "$state" == *"DRAIN"* ]] ||
 	       [ $(( cavail - ${calloc:-0} )) -lt "$MIN_CPU" ] ||
 	       [ $(( mavail - ${malloc:-0} )) -lt "$MIN_RAM" ] ; then
@@ -102,18 +124,21 @@ n=$(while read -r node ; do
 	fi
 	echo "$node ${avail:-0} ${alloc:-0}"
     done < <(scontrol show nodes | \
-		 grep -e NodeName -e TRES -e State))
+		 grep -e NodeName \
+		      -e AvailableFeatures \
+		      -e TRES -e State))
 
+# Get a list of available QoS for each partition.
 qos=$(scontrol show -o partition | \
     sed 's/PartitionName=\([a-z]*\).*AllowQos=\([a-z,]*\).*/\1\t\2/' | \
     tr ',' ' ')
 
 (
-    echo "+,+,,+,,+,,,,+,,+"
-    echo "|,|,# $GRES,|,I,|,II,III,IV,|,Allowed QoS,|"
-    echo "+,+,,+,,+,,,,+,,+"
+    echo "+,,+,,+,,,,,+,,+"
+    echo "|,Partition,|,# ${GRES^^},|,I,II,III,IV,|,QoS,|"
+    echo "+,,+,,+,,,,,+,,+"
     while read -r name nodes ; do
-	echo -n "| $name,|,"
+
 	pn=$(while read -r node ; do
 		 echo "$n" | grep "$node"
 	     done < <(echo "$nodes" | tr ',' '\n'))
@@ -125,7 +150,8 @@ qos=$(scontrol show -o partition | \
 	IV=$(echo "$pn" | awk '{sum+=int(($2 - $3)/4)} END { print sum }')
 	q=$(echo "$qos" | awk -F'\t' -v p="$name" '$1 == p { print $2 }')
 
-	echo "$avail,|,$I,|,$II,$III,$IV,|,$q,|"
+	echo "|,$name,|,$avail,|,$I,$II,$III,$IV,|,$q,|"
     done < <(echo "$p")
-    echo "+,+,,+,,+,,,,+,,+"
-) | column -t -s',' | sed '/+/s/ /-/g'
+    echo "+,,+,,+,,,,,+,,+"
+) | column -t -s',' | sed '/^+/s/ /-/g'
+
