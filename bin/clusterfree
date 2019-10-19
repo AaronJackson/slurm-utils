@@ -53,7 +53,7 @@ while getopts ":cghn:m:" opt ; do
 	    echo " -c      Show available CPUs."
 	    echo
 	    echo " -n X    Given X CPUs are available."
-	    echo " -m X    Given M bytes of RAM available (suffix K, M, G, etc)"
+	    echo " -m X    Given X bytes of RAM available (suffix K, M, G, etc)"
 	    exit
 	    ;;
 
@@ -113,7 +113,7 @@ qos=$(scontrol show -o partition | \
     echo "|,|,# $GRES,|,I,|,II,III,IV,|,Allowed QoS,|"
     echo "+,+,,+,,+,,,,+,,+"
     while read -r name nodes ; do
-	echo -n "|$name,|,"
+	echo -n "| $name,|,"
 	pn=$(while read -r node ; do
 		 echo "$n" | grep "$node"
 	     done < <(echo "$nodes" | tr ',' '\n'))
