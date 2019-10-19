@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -u
+set -ue
 
 ######################################################################
 # Copyright 2019 Aaron S. Jackson <asj@cs.nott.ac.uk>
@@ -18,7 +18,7 @@ MIN_CPU=0
 MIN_RAM=0
 CONSTRAINT=
 
-while getopts ":cghn:m:t:" opt ; do
+while getopts ":cghn:m:t:T" opt ; do
     case ${opt} in
 	c)  # Show available CPUs
 	    GRES=cpu
@@ -40,6 +40,13 @@ while getopts ":cghn:m:t:" opt ; do
 	    CONSTRAINT=$(echo "$OPTARG" | tr ',' '\n' | sort)
 	    ;;
 
+	T)  # List valid constraints for this cluster.
+	    scontrol show node | \
+		grep AvailableFeatures | \
+		cut -d'=' -f2 | tr ',' '\n' | sort -u
+	    exit
+	    ;;
+
 	h)  # Show some help
 	    echo "clusterfree"
 	    echo "Released under the GNU GPL."
@@ -53,12 +60,17 @@ while getopts ":cghn:m:t:" opt ; do
 	    echo "  and quads (IV) available on any single node"
 	    echo
 	    echo "ARGUMENTS:"
-	    echo " -g          Show available GPUs (default)."
-	    echo " -c          Show available CPUs."
+	    echo "             Modifiers..."
+	    echo " -g ............. Show available GPUs (default)."
+	    echo " -c ............. Show available CPUs."
 	    echo
-	    echo " -n X        Given X CPUs are available."
-	    echo " -m X        Given X bytes of RAM available (with suffix)."
-	    echo " -t features Given nodes of a features (command delimited)."
+	    echo "             Filter by..."
+	    echo " -n X ........... X CPUs are available."
+	    echo " -m X ........... X bytes of RAM available (with suffix)."
+	    echo " -t features .... nodes of a features (command delimited)."
+	    echo
+	    echo "             Utilities..."
+	    echo " -T ............. View a list of valid features"
 	    echo
 	    exit
 	    ;;
@@ -79,9 +91,9 @@ p=$(while IFS='=' read -r _ partition ; do
 
 
 # Get a list of nodes and dump availability info.
-gregex='s/.*gpu=\([0-9]\).*/\1/p'
-cregex='s/.*cpu=\([0-9]*\).*/\1/p'
-mregex='s/.*mem=\([0-9]*[KMGT]\).*/\1/pi'
+gregex='s/.*gpu=\([0-9]\).*/\1/p'          # GPUs
+cregex='s/.*cpu=\([0-9]*\).*/\1/p'         # CPUs
+mregex='s/.*mem=\([0-9]*[KMGT]\).*/\1/pi'  # RAM
 
 n=$(while read -r node ; do
 	read -r features
@@ -116,7 +128,6 @@ n=$(while read -r node ; do
 	    continue
 	fi
 
-
 	if [ "$GRES" == "gpu" ] ; then
 	    alloc=$galloc; avail=$gavail;
 	elif [ "$GRES" == "cpu" ] ; then
@@ -130,28 +141,27 @@ n=$(while read -r node ; do
 
 # Get a list of available QoS for each partition.
 qos=$(scontrol show -o partition | \
-    sed 's/PartitionName=\([a-z]*\).*AllowQos=\([a-z,]*\).*/\1\t\2/' | \
-    tr ',' ' ')
+          sed 's/PartitionName=\([a-z]*\).*AllowQos=\([a-z,]*\).*/\1\t\2/' | \
+          tr ',' ' ')
 
 (
-    echo "+,,+,,+,,,,,+,,+"
-    echo "|,Partition,|,# ${GRES^^},|,I,II,III,IV,|,QoS,|"
-    echo "+,,+,,+,,,,,+,,+"
+    echo "+,+,+,,,,,+,+"
+    echo "| Partition,| # ${GRES^^},|,I,II,III,IV,| QoS,|"
+    echo "+,+,+,,,,,+,+"
     while read -r name nodes ; do
-
 	pn=$(while read -r node ; do
-		 echo "$n" | grep "$node"
+		 (echo "$n" | grep "$node") || true
 	     done < <(echo "$nodes" | tr ',' '\n'))
 
-	avail=$(echo "$pn" | awk '{sum+=$2} END { print sum }')
-	I=$(echo "$pn" | awk '{sum+=$2-$3} END { print sum }')
-	II=$(echo "$pn" | awk '{sum+=int(($2 - $3)/2)} END { print sum }')
-	III=$(echo "$pn" | awk '{sum+=int(($2 - $3)/3)} END { print sum }')
-	IV=$(echo "$pn" | awk '{sum+=int(($2 - $3)/4)} END { print sum }')
-	q=$(echo "$qos" | awk -F'\t' -v p="$name" '$1 == p { print $2 }')
+	avail=$(echo "$pn" | awk '{s+=$2} END { print s }')
+	I=$(echo "$pn" | awk '{s+=$2-$3} END { print s }')
+	II=$(echo "$pn" | awk '{s+=int(($2 - $3)/2)} END { print s }')
+	III=$(echo "$pn" | awk '{s+=int(($2 - $3)/3)} END { print s }')
+	IV=$(echo "$pn" | awk '{s+=int(($2 - $3)/4)} END { print s }')
+	q=$(echo "$qos" | awk -F'\t' -v p="$name" \
+			      '$1 == p { print $2 }')
 
-	echo "|,$name,|,$avail,|,$I,$II,$III,$IV,|,$q,|"
+	echo "| $name,| $avail,|,$I,$II,$III,$IV,| $q,|"
     done < <(echo "$p")
-    echo "+,,+,,+,,,,,+,,+"
+    echo "+,+,+,,,,,+,+"
 ) | column -t -s',' | sed '/^+/s/ /-/g'
-
