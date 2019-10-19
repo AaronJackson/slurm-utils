@@ -1,5 +1,6 @@
 #!/bin/bash
 
+set -u
 
 ######################################################################
 # Copyright 2019 Aaron S. Jackson <asj@cs.nott.ac.uk>
@@ -18,11 +19,11 @@ MIN_RAM=0
 
 while getopts ":cghn:m:" opt ; do
     case ${opt} in
-	c|-cpu)
+	c)
 	    GRES=cpu
 	    ;;
 
-	g|-gpu)
+	g)
 	    GRES=gpu
 	    ;;
 
@@ -31,11 +32,11 @@ while getopts ":cghn:m:" opt ; do
 	    ;;
 
 	m)
-	    MIN_RAM=`echo $OPTARG | tr '[:lower:]' '[:upper:]'`
-	    MIN_RAM=`numfmt --from=iec $MIN_RAM`
+	    MIN_RAM=$(echo "$OPTARG" | tr '[:lower:]' '[:upper:]')
+	    MIN_RAM=$(numfmt --from=iec "$MIN_RAM")
 	    ;;
 
-	h|-help)
+	h)
 	    echo "clusterfree"
 	    echo "Released under the GNU GPL."
 	    echo
@@ -55,6 +56,11 @@ while getopts ":cghn:m:" opt ; do
 	    echo " -m X    Given M bytes of RAM available (suffix K, M, G, etc)"
 	    exit
 	    ;;
+
+	*)
+	    echo "Use -h for help"
+	    exit
+	    ;;
     esac
 done
 
@@ -62,29 +68,29 @@ gregex='s/.*gpu=\([0-9]\).*/\1/p'
 cregex='s/.*cpu=\([0-9]*\).*/\1/p'
 mregex='s/.*mem=\([0-9]*[KMGT]\).*/\1/pi'
 
-p=$(while IFS='=' read x partition ; do
-	IFS='=' read x nodes
-	echo $partition $nodes
+p=$(while IFS='=' read -r _ partition ; do
+	IFS='=' read -r _ nodes
+	echo "$partition $nodes"
     done < <(scontrol show part | \
 		 grep -e PartitionName -e ' Nodes'))
 
-n=$(while read node ; do
-	read state
-	read avail
-	read alloc
-	node=$(echo $node | tr '=' ' ' | awk '{ print $2 }')
+n=$(while read -r node ; do
+	read -r state
+	read -r avail
+	read -r alloc
+	node=$(echo "$node" | tr '=' ' ' | awk '{ print $2 }')
 
-	state=$(echo $state | sed -n 's/.*State=\([A-Z+]*\).*/\1/p')
-	gavail=$(echo $avail | sed -n $gregex)
-	galloc=$(echo $alloc | sed -n $gregex)
-	cavail=$(echo $avail | sed -n $cregex)
-	calloc=$(echo $alloc | sed -n $cregex)
-	mavail=$(echo $avail | sed -n $mregex | numfmt --from=iec)
-	malloc=$(echo $alloc | sed -n $mregex | numfmt --from=iec)
+	state=$(echo "$state" | sed -n 's/.*State=\([A-Z+]*\).*/\1/p')
+	gavail=$(echo "$avail" | sed -n "$gregex")
+	galloc=$(echo "$alloc" | sed -n "$gregex")
+	cavail=$(echo "$avail" | sed -n "$cregex")
+	calloc=$(echo "$alloc" | sed -n "$cregex")
+	mavail=$(echo "$avail" | sed -n "$mregex" | numfmt --from=iec)
+	malloc=$(echo "$alloc" | sed -n "$mregex" | numfmt --from=iec)
 
 	if [ "$state" = "DOWN" ] || [[ "$state" == *"DRAIN"* ]] ||
-	       [ $(( $cavail - ${calloc:-0} )) -lt "$MIN_CPU" ] ||
-	       [ $(( $mavail - ${malloc:-0} )) -lt "$MIN_RAM" ] ; then
+	       [ $(( cavail - ${calloc:-0} )) -lt "$MIN_CPU" ] ||
+	       [ $(( mavail - ${malloc:-0} )) -lt "$MIN_RAM" ] ; then
 	    continue
 	fi
 
@@ -94,7 +100,7 @@ n=$(while read node ; do
 	elif [ "$GRES" == "cpu" ] ; then
 	    alloc=$calloc; avail=$cavail;
 	fi
-	echo $node ${avail:-0} ${alloc:-0}
+	echo "$node ${avail:-0} ${alloc:-0}"
     done < <(scontrol show nodes | \
 		 grep -e NodeName -e TRES -e State))
 
@@ -106,10 +112,10 @@ qos=$(scontrol show -o partition | \
     echo "+,+,,+,,+,,,,+,,+"
     echo "|,|,# $GRES,|,I,|,II,III,IV,|,Allowed QoS,|"
     echo "+,+,,+,,+,,,,+,,+"
-    while read name nodes ; do
-	echo -n "| "$name,"|",
-	pn=$(while read node ; do
-		 echo "$n" | grep $node
+    while read -r name nodes ; do
+	echo -n "|$name,|,"
+	pn=$(while read -r node ; do
+		 echo "$n" | grep "$node"
 	     done < <(echo "$nodes" | tr ',' '\n'))
 
 	avail=$(echo "$pn" | awk '{sum+=$2} END { print sum }')
@@ -119,7 +125,7 @@ qos=$(scontrol show -o partition | \
 	IV=$(echo "$pn" | awk '{sum+=int(($2 - $3)/4)} END { print sum }')
 	q=$(echo "$qos" | awk -F'\t' -v p="$name" '$1 == p { print $2 }')
 
-	echo $avail,"|",$I,"|",$II,$III,$IV,"|",$q,"|"
+	echo "$avail,|,$I,|,$II,$III,$IV,|,$q,|"
     done < <(echo "$p")
     echo "+,+,,+,,+,,,,+,,+"
 ) | column -t -s',' | sed '/+/s/ /-/g'
