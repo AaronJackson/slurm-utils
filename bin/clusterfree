@@ -14,22 +14,28 @@
 
 GRES=gpu
 MIN_CPU=0
+MIN_RAM=0
 
-for i in "$@" ; do
-    case $i in
-	-c)
+while getopts ":cghn:m:" opt ; do
+    case ${opt} in
+	c|-cpu)
 	    GRES=cpu
 	    ;;
 
-	-g)
+	g|-gpu)
 	    GRES=gpu
 	    ;;
 
-	--min-cpu=*)
-	    MIN_CPU=${i#*=}
+	n)
+	    MIN_CPU=$OPTARG
 	    ;;
 
-	-h|*)
+	m)
+	    MIN_RAM=`echo $OPTARG | tr '[:lower:]' '[:upper:]'`
+	    MIN_RAM=`numfmt --from=iec $MIN_RAM`
+	    ;;
+
+	h|-help)
 	    echo "clusterfree"
 	    echo "Released under the GNU GPL."
 	    echo
@@ -42,10 +48,11 @@ for i in "$@" ; do
 	    echo "  and quads (IV) available on any single node"
 	    echo
 	    echo "ARGUMENTS:"
-	    echo "          -g    Show available GPUs (default)."
-	    echo "          -c    Show available CPUs."
-	    echo " --min-cpu=n    Given n CPUs are available."
+	    echo " -g      Show available GPUs (default)."
+	    echo " -c      Show available CPUs."
 	    echo
+	    echo " -n X    Given X CPUs are available."
+	    echo " -m X    Given M bytes of RAM available (suffix K, M, G, etc)"
 	    exit
 	    ;;
     esac
@@ -53,6 +60,7 @@ done
 
 gregex='s/.*gpu=\([0-9]\).*/\1/p'
 cregex='s/.*cpu=\([0-9]*\).*/\1/p'
+mregex='s/.*mem=\([0-9]*[KMGT]\).*/\1/pi'
 
 p=$(while IFS='=' read x partition ; do
 	IFS='=' read x nodes
@@ -71,16 +79,15 @@ n=$(while read node ; do
 	galloc=$(echo $alloc | sed -n $gregex)
 	cavail=$(echo $avail | sed -n $cregex)
 	calloc=$(echo $alloc | sed -n $cregex)
+	mavail=$(echo $avail | sed -n $mregex | numfmt --from=iec)
+	malloc=$(echo $alloc | sed -n $mregex | numfmt --from=iec)
 
-	if [ "$state" = "DOWN" ] || [[ "$state" == *"DRAIN"* ]]; then
+	if [ "$state" = "DOWN" ] || [[ "$state" == *"DRAIN"* ]] ||
+	       [ $(( $cavail - ${calloc:-0} )) -lt "$MIN_CPU" ] ||
+	       [ $(( $mavail - ${malloc:-0} )) -lt "$MIN_RAM" ] ; then
 	    continue
 	fi
 
-	if [ $(( $cavail - ${calloc:-0} )) -lt "$MIN_CPU" ] ; then
-	    # Set the number of allocated GPUs to the number of
-	    # available GPUs to make it seem like none are available.
-	    galloc=$gavail
-	fi
 
 	if [ "$GRES" == "gpu" ] ; then
 	    alloc=$galloc; avail=$gavail;
